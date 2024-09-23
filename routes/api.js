@@ -2,22 +2,40 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const router = express.Router();
+const he = require('he');
 require('dotenv').config();
+const { YoutubeTranscript } = require('youtube-transcript');
+
+function decodeHtmlEntities(str) {
+    // Decode once
+    let decodedStr = he.decode(str);
+  
+    // Decode again in case of double encoding
+    decodedStr = he.decode(decodedStr);
+    
+    return decodedStr;
+}
 
 // Define a basic route
 router.post('/generate-summary', async (req, res) => {
-  const { text } = req.body;
-  if (!text) {
+  const { videoURL } = req.body;
+  if (!videoURL) {
     return res.status(400).json({ error: 'Text is required to generate a summary.' });
   }
   try {
+    const transcript = await YoutubeTranscript.fetchTranscript(videoURL);
+    let newTranscript = '';
+    for (let i = 0; i < transcript.length; i++) {
+      newTranscript +=  `${transcript[i].text}\n`;
+    }
+    newTranscript = decodeHtmlEntities(newTranscript);
     // Make a request to OpenAI API
     const response = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
         model: 'gpt-3.5-turbo',  // or 'gpt-4' if you have access
-        messages: [{ role: 'user', content: `Summarize the following text: ${text}` }],
-        max_tokens: 150,  // Adjust as needed to control the length of the summary
+        messages: [{ role: 'user', content: `Summarize the following text: ${newTranscript}` }],
+        max_tokens: 1000,  // Adjust as needed to control the length of the summary
       },
       {
         headers: {
