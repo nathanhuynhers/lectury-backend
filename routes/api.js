@@ -17,8 +17,17 @@ async function generateSummaryFromText(text) {
     'https://api.openai.com/v1/chat/completions',
     {
       model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: `Summarize the following text:\n\n${text}` }],
-      max_tokens: 1000,
+      messages: [{
+        role: 'user',
+        content: `Summarize the following transcript into clear, concise notes as if you are helping a student or professional study or review the material.
+      
+      Organize the content by topics or themes, and include key takeaways, examples, or definitions when relevant.
+      
+      Avoid unnecessary filler, and focus on capturing the important information for quick reading and comprehension. Keep it nice detailed and well formatted paragraphs.
+      
+      Transcript:\n\n${text}`
+      }],
+      max_tokens: 4096,
     },
     {
       headers: {
