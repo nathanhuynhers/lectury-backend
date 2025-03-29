@@ -5,6 +5,30 @@ const router = express.Router();
 const he = require('he');
 require('dotenv').config();
 const { YoutubeTranscript } = require('youtube-transcript');
+const multer = require('multer');
+const fs = require('fs/promises');
+const FormData = require('form-data');
+
+// Multer setup for handling MP4 file uploads
+const upload = multer({ dest: 'uploads/' });
+
+async function generateSummaryFromText(text) {
+  const response = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: `Summarize the following text:\n\n${text}` }],
+      max_tokens: 1000,
+    },
+    {
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  return response.data.choices[0].message.content;
+}
 
 function decodeHtmlEntities(str) {
     // Decode once
@@ -23,36 +47,64 @@ router.post('/generate-summary', async (req, res) => {
     return res.status(400).json({ error: 'Text is required to generate a summary.' });
   }
   try {
-    const transcript = await YoutubeTranscript.fetchTranscript(videoURL);
+    const transcript = await YoutubeTranscript.fetchTranscript(videoURL, { lang: 'en' });
     let newTranscript = '';
     for (let i = 0; i < transcript.length; i++) {
       newTranscript +=  `${transcript[i].text}\n`;
     }
     newTranscript = decodeHtmlEntities(newTranscript);
-    // Make a request to OpenAI API
-    const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-3.5-turbo',  // or 'gpt-4' if you have access
-        messages: [{ role: 'user', content: `Summarize the following text: ${newTranscript}` }],
-        max_tokens: 1000,  // Adjust as needed to control the length of the summary
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,  // Replace with your OpenAI API key
-          'Content-Type': 'application/json',
-        },
-      }
-    );
 
     // Extract the summary from the API response
-    const summary = response.data.choices[0].message.content;
+    const summary = await generateSummaryFromText(newTranscript);
 
     // Send the summary back to the frontend
     res.json({ summary });
   } catch (error) {
     console.error('Error fetching summary from OpenAI:', error.response ? error.response.data : error.message);
     res.status(500).json({ error: 'Error generating summary' });
+  }
+});
+
+// Route for audio/video upload and Whisper transcription
+router.post('/upload-video', upload.single('video'), async (req, res) => {
+  const filePath = req.file.path;
+
+  try {
+    const formData = new FormData();
+    formData.append('file', await fs.readFile(filePath), {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
+    });
+    formData.append('model', 'whisper-1');
+
+    const whisperResponse = await axios.post(
+      'https://api.openai.com/v1/audio/transcriptions',
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders(),
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+
+    const transcriptText = whisperResponse.data.text;
+    const summary = await generateSummaryFromText(transcriptText);
+
+    res.json({
+      transcript: transcriptText,
+      summary: summary,
+    });
+
+  } catch (error) {
+    console.error('Error transcribing file:', error);
+    res.status(500).json({ error: 'Failed to transcribe file.' });
+  } finally {
+    try {
+      await fs.unlink(filePath);
+    } catch (err) {
+      console.warn('Error cleaning up file:', err);
+    }
   }
 });
 
